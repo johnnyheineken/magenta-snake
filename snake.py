@@ -57,7 +57,7 @@ COL_BLACK = 6
 COL_GREEN = 7
 COL_PINK = 8
 
-TEXT_DEATH = ["GAME OVER", "(Q)UIT", "(R)ESTART"]
+TEXT_DEATH = ["GAME OVER", "(R)ESTART"]
 HEIGHT_DEATH = 5
 
 WIDTH = 30
@@ -147,6 +147,9 @@ class Snake:
                 self.update_snake()
                 self.check_death()
                 self.check_fruit()
+        else:
+            if self.mouse_pressed_button == 'up':
+                self.reset()
 
         if pyxel.btn(pyxel.KEY_Q):
             pyxel.quit()
@@ -392,18 +395,27 @@ class Snake:
             col = pressed_col
         pyxel.rect(x, y, w, h, col)
         text_x = self.center_button_text(text, x, w)
-        pyxel.text(text_x, y + 3, text, text_col)
+        text_y = self.center_button_text_vertically(y, h)
+        pyxel.text(text_x, text_y, text, text_col)
 
     def draw_death(self):
         """Draw a blank screen with some text."""
 
         pyxel.cls(col=COL_WHITE)
-        display_text = TEXT_DEATH[:]
+        display_text = TEXT_DEATH[:-1]
         display_text.insert(1, f"{self.score:04}")
         for i, text in enumerate(display_text):
             y_offset = (pyxel.FONT_HEIGHT + 2) * i
             text_x = self.center_text(text, DRAW_WIDTH)
             pyxel.text(text_x, HEIGHT_DEATH + y_offset, text, COL_MAGENTA)
+
+        x = DRAW_WIDTH // 3 + 1
+        y = DRAW_HEIGHT + 1 - HEIGHT_CONTROLS * SCALING_RATIO
+        button_width = DRAW_WIDTH // 3 - 2
+        button_height = HEIGHT_CONTROLS * SCALING_RATIO // 2 - 1
+
+        self.draw_button(x, y, w=button_width, h=button_height,col=COL_BLACK, text=TEXT_DEATH[-1], text_col=COL_WHITE, pressed_col=COL_GREEN)
+
 
     @staticmethod
     def center_text(text, page_width, char_width=pyxel.FONT_WIDTH):
@@ -419,6 +431,13 @@ class Snake:
         text_width = len(text) * char_width
 
         return button_x + (button_width - text_width) // 2
+
+    @staticmethod
+    def center_button_text_vertically(button_y, button_height, char_height=pyxel.FONT_HEIGHT):
+        """Helper function for calculating the start x value for centered text."""
+
+
+        return button_y + (button_height - char_height) // 2
 
 
 ###########################
