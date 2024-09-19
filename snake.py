@@ -48,14 +48,14 @@ class Point:
 # Constants #
 #############
 
-COL_MAGENTA = 1
-COL_LIGHT_YELLOW = 2
-COL_ORANGE = 3
-COL_BLUE = 4
-COL_WHITE = 5
-COL_BLACK = 6
-COL_GREEN = 7
-COL_PINK = 8
+COL_MAGENTA = pyxel.COLOR_RED
+COL_LIGHT_YELLOW = pyxel.COLOR_YELLOW
+COL_ORANGE = pyxel.COLOR_ORANGE
+COL_BLUE = pyxel.COLOR_NAVY
+COL_WHITE = pyxel.COLOR_WHITE
+COL_BLACK = pyxel.COLOR_BLACK
+COL_GREEN = pyxel.COLOR_GREEN
+COL_PINK = pyxel.COLOR_PINK
 
 TEXT_DEATH = ["GAME OVER", "(R)ESTART"]
 HEIGHT_DEATH = 5
@@ -77,12 +77,47 @@ LEFT = Point(-1, 0)
 START = Point(5, 5 + HEIGHT_SCORE)
 
 SCORE_SPEED = {
-    0: 6,
-    3: 5,
-    7: 4,
-    12: 3,
-    20: 2,
-    50: 1
+    0: 18,
+    2: 16,
+    5: 14,
+    9: 12,
+    12: 10,
+    17: 9,
+    23: 8,
+    30: 7,
+    38: 6,
+    49: 5,
+    60: 4,
+    75: 3,
+    88: 2,
+    99: 1
+
+}
+
+DEFAULT_SPEED = 20
+COLLISION_WITH_WALLS = False
+
+SPEED_TO_FRAME_MAPPING = {
+    20: [8, 7, 7],
+    19: [7, 7, 7],
+    18: [7, 7, 6],
+    17: [7, 6, 6],
+    16: [6, 6, 6],
+    15: [6, 6, 5],
+    14: [6, 5, 5],
+    13: [5, 5, 5],
+    12: [5, 5, 4],
+    11: [5, 4, 4],
+    10: [4, 4, 4],
+    9: [4, 4, 3],
+    8: [4, 3, 3],
+    7: [3, 3, 3],
+    6: [3, 3, 2],
+    5: [3, 2, 2],
+    4: [2, 2, 2],
+    3: [2, 2, 1],
+    2: [2, 1, 1],
+    1: [1, 1, 1]
 }
 
 
@@ -92,13 +127,13 @@ SCORE_SPEED = {
 
 def define_colors():
     pyxel.colors[COL_MAGENTA] = 0xCC0066
-    pyxel.colors[COL_LIGHT_YELLOW] = 0xC97D23
-    pyxel.colors[COL_ORANGE] = 0xD0953B
-    pyxel.colors[COL_BLUE] = 0x4b34a3
-    pyxel.colors[COL_BLACK] = 0x000000
-    pyxel.colors[COL_WHITE] = 0xffffff
-    pyxel.colors[COL_GREEN] = 0x74b2b2
-    pyxel.colors[COL_PINK] = 0xc43486
+    # pyxel.colors[COL_LIGHT_YELLOW] = 0xC97D23
+    # pyxel.colors[COL_ORANGE] = 0xD0953B
+    # pyxel.colors[COL_BLUE] = 0x4b34a3
+    # pyxel.colors[COL_BLACK] = 0x000000
+    # pyxel.colors[COL_WHITE] = 0xffffff
+    # pyxel.colors[COL_GREEN] = 0x74b2b2
+    # pyxel.colors[COL_PINK] = 0xc43486
 
 
 class Snake:
@@ -110,9 +145,12 @@ class Snake:
         pyxel.init(
             DRAW_WIDTH, DRAW_HEIGHT, title="Snake!", fps=60, display_scale=8, capture_scale=6
         )
+        pyxel.load('assets.pyxres')
         define_colors()
         define_sound_and_music()
+        self.wall_collision = COLLISION_WITH_WALLS
         self.reset()
+
         pyxel.mouse(visible=True)
         pyxel.run(self.update, self.draw)
 
@@ -125,8 +163,11 @@ class Snake:
         self.death = False
         self.score = 0
         self.generate_fruit()
-        self.speed = 6
+        self.speed = DEFAULT_SPEED
+        self.speed_frames = deque(SPEED_TO_FRAME_MAPPING[self.speed])
+        self.current_frame_speed = self.speed_frames[0]
         self.frame_count = 0
+        self.last_update_before = 0
         self.mouse_pressed_button = None
 
         pyxel.playm(0, loop=True)
@@ -134,19 +175,26 @@ class Snake:
     ##############
     # Game logic #
     ##############
+    def rotate_speed(self):
+        self.speed_frames.rotate()
+        self.current_frame_speed = self.speed_frames[0]
+        self.last_update_before = 0
 
     def update(self):
         """Update logic of game.
         Updates the snake and checks for scoring/win condition."""
         self.frame_count += 1
+        self.last_update_before += 1
         if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
             self.check_button_hitboxes()
         if not self.death:
             self.update_direction()
-            if self.frame_count % self.speed == 0:
+            if self.last_update_before == self.current_frame_speed:
+                self.rotate_speed()
                 self.update_snake()
                 self.check_death()
                 self.check_fruit()
+
         else:
             if self.mouse_pressed_button == 'up':
                 self.reset()
@@ -192,6 +240,7 @@ class Snake:
                 self.mouse_pressed_button = key
 
         return None
+
     def update_direction(self):
         """Watch the keys and change direction."""
         if self.mouse_pressed_button:
@@ -223,11 +272,26 @@ class Snake:
                 if self.direction is not LEFT:
                     self.direction = RIGHT
 
+    def get_new_snake_head(self):
+        old_head = self.snake[0]
+
+        if self.wall_collision is False:
+            if old_head.x < 0:
+                return Point(WIDTH - 1, old_head.y + self.direction.y)
+            elif old_head.x >= WIDTH:
+                return Point(0, old_head.y + self.direction.y)
+            elif old_head.y < HEIGHT_SCORE:
+                return Point(old_head.x + self.direction.x, HEIGHT - HEIGHT_CONTROLS - 1)
+            elif old_head.y >= HEIGHT - HEIGHT_CONTROLS:
+                return Point(old_head.x + self.direction.x, HEIGHT_SCORE)
+
+        return Point(old_head.x + self.direction.x, old_head.y + self.direction.y)
+
+
     def update_snake(self):
         """Move the snake based on the direction."""
 
-        old_head = self.snake[0]
-        new_head = Point(old_head.x + self.direction.x, old_head.y + self.direction.y)
+        new_head = self.get_new_snake_head()
         self.snake.appendleft(new_head)
         self.popped_point = self.snake.pop()
 
@@ -239,11 +303,13 @@ class Snake:
 
     def check_melon(self):
         if {self.snake[0]}.intersection(set(self.melon)):
+            self.speed = SCORE_SPEED[self.score]
             self.score += 1
             self.generate_fruit()
             self.snake.append(self.popped_point)
-            self.speed = self.speed - 1
+            self.snake.append(self.popped_point)
 
+            self.speed_frames = deque(SPEED_TO_FRAME_MAPPING[self.speed])
             pyxel.play(0, 0)
 
     def check_apple(self):
@@ -281,17 +347,18 @@ class Snake:
 
         self.melon = self.melon_points(self.snake[0].x, self.snake[0].y)
         while set(self.melon).intersection(snake_pixels):
-            x = pyxel.rndi(0, WIDTH - 1)
-            y = pyxel.rndi(HEIGHT_SCORE + 1, HEIGHT - HEIGHT_CONTROLS - 1)
+            x = pyxel.rndi(0, WIDTH - 2)
+            y = pyxel.rndi(HEIGHT_SCORE + 2, HEIGHT - HEIGHT_CONTROLS - 2)
             self.melon = self.melon_points(x, y)
 
     def check_death(self):
         """Check whether the snake has died (out of bounds or doubled up.)"""
 
         head = self.snake[0]
-        if head.x < 0 or head.y < HEIGHT_SCORE or head.x >= WIDTH or head.y >= HEIGHT - HEIGHT_CONTROLS:
-            self.death_event()
-        elif len(self.snake) != len(set(self.snake)):
+        if self.wall_collision:
+            if head.x < 0 or head.y < HEIGHT_SCORE or head.x >= WIDTH or head.y >= HEIGHT - HEIGHT_CONTROLS:
+                self.death_event()
+        if len(self.snake) != len(set(self.snake)):
             self.death_event()
 
     def death_event(self):
@@ -309,7 +376,7 @@ class Snake:
         """Draw the background, snake, score, and apple OR the end screen."""
 
         if not self.death:
-            pyxel.cls(col=COL_MAGENTA)
+            pyxel.cls(col=COL_BLACK)
             self.draw_snake()
             self.draw_score()
             self.draw_fruit()
@@ -326,33 +393,38 @@ class Snake:
             self.draw_apple()
 
     def draw_apple(self):
-        pyxel.rect(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_PINK)
-        pyxel.rectb(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_LIGHT_YELLOW)
+        # pyxel.rect(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_WHITE)
+        # pyxel.rectb(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_LIGHT_YELLOW)
+        pyxel.blt(self.apple.draw_x-2, self.apple.draw_y-2, 0,0, 0, 8, 8, colkey=pyxel.COLOR_BLACK)
+        # pyxel.rect(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_WHITE)
 
-        greenery_offset = SCALING_RATIO // 2
-        pyxel.pset(self.apple.draw_x + greenery_offset, self.apple.draw_y - 1, COL_GREEN)
-        pyxel.pset(self.apple.draw_x + greenery_offset + 1, self.apple.draw_y - 2, COL_GREEN)
-        pyxel.pset(self.apple.draw_x, self.apple.draw_y, col=COL_MAGENTA)
+
+
+        # greenery_offset = SCALING_RATIO // 2
+        # pyxel.pset(self.apple.draw_x + greenery_offset, self.apple.draw_y - 1, COL_GREEN)
+        # pyxel.pset(self.apple.draw_x + greenery_offset + 1, self.apple.draw_y - 2, COL_GREEN)
+        # pyxel.pset(self.apple.draw_x, self.apple.draw_y, col=COL_MAGENTA)
 
     def draw_melon(self):
-        pyxel.rect(self.melon[0].draw_x, self.melon[0].draw_y, w=SCALING_RATIO * 2, h=SCALING_RATIO * 2, col=COL_GREEN)
+        pyxel.blt(self.melon[0].draw_x-4, self.melon[0].draw_y-4, 0,16, 0, 16, 16, colkey=pyxel.COLOR_BLACK)
+        # pyxel.rect(self.melon[0].draw_x, self.melon[0].draw_y, w=SCALING_RATIO * 2, h=SCALING_RATIO * 2, col=COL_GREEN)
 
     def draw_snake(self):
         """Draw the snake with a distinct head by iterating through deque."""
 
         for i, point in enumerate(self.snake):
             if i == 0:
-                colour = COL_ORANGE
+                colour = pyxel.COLOR_GREEN
             else:
-                colour = COL_LIGHT_YELLOW
+                colour = pyxel.COLOR_LIME
 
             pyxel.rect(point.draw_x, point.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=colour)
 
     def draw_score(self):
         """Draw the score at the top."""
 
-        score = f"{self.score:04}"
-        pyxel.rect(0, 0, DRAW_WIDTH, HEIGHT_SCORE * SCALING_RATIO, COL_BLACK)
+        score = f"{self.score * 100:04}"
+        pyxel.rect(0, 0, DRAW_WIDTH, HEIGHT_SCORE * SCALING_RATIO, COL_MAGENTA)
         pyxel.text(1, 1, score, COL_WHITE)
 
     def draw_controls(self):
@@ -362,33 +434,32 @@ class Snake:
                    y=DRAW_HEIGHT - HEIGHT_CONTROLS * SCALING_RATIO,
                    w=DRAW_WIDTH,
                    h=HEIGHT_CONTROLS * SCALING_RATIO,
-                   col=COL_BLACK)
+                   col=COL_MAGENTA)
         button_width = DRAW_WIDTH // 3 - 2
         button_height = HEIGHT_CONTROLS * SCALING_RATIO // 2 - 1
         upper_row = DRAW_HEIGHT + 1 - HEIGHT_CONTROLS * SCALING_RATIO
         lower_row = DRAW_HEIGHT + 1 - HEIGHT_CONTROLS * SCALING_RATIO // 2
-        button_color = COL_MAGENTA
+        button_color = pyxel.COLOR_WHITE
         self.draw_button(DRAW_WIDTH // 3 + 1,
                          y=upper_row,
                          w=button_width,
                          h=button_height,
-                         col=button_color, text='UP', text_col=COL_WHITE, pressed_col=COL_PINK)
+                         col=button_color, text='UP', text_col=COL_BLACK, pressed_col=COL_PINK)
         self.draw_button(DRAW_WIDTH // 3 + 1,
                          y=lower_row,
                          w=button_width,
                          h=button_height,
-                         col=button_color, text='DOWN', text_col=COL_WHITE, pressed_col=COL_PINK)
+                         col=button_color, text='DOWN', text_col=COL_BLACK, pressed_col=COL_PINK)
         self.draw_button(2,
                          y=lower_row,
                          w=button_width,
                          h=button_height,
-                         col=button_color, text='LEFT', text_col=COL_WHITE, pressed_col=COL_PINK)
+                         col=button_color, text='LEFT', text_col=COL_BLACK, pressed_col=COL_PINK)
         self.draw_button(2 * DRAW_WIDTH // 3,
                          y=lower_row,
                          w=button_width,
                          h=button_height,
-                         col=button_color, text='RIGHT', text_col=COL_WHITE, pressed_col=COL_PINK)
-        pyxel.text(1, 1 + DRAW_HEIGHT - HEIGHT_CONTROLS * SCALING_RATIO, 'HELLO', COL_WHITE)
+                         col=button_color, text='RIGHT', text_col=COL_BLACK, pressed_col=COL_PINK)
 
     def draw_button(self, x, y, w, h, col, text, text_col, pressed_col):
         if text.lower == self.mouse_pressed_button:
@@ -403,7 +474,7 @@ class Snake:
 
         pyxel.cls(col=COL_WHITE)
         display_text = TEXT_DEATH[:-1]
-        display_text.insert(1, f"{self.score:04}")
+        display_text.insert(1, f"{self.score * 100:04}")
         for i, text in enumerate(display_text):
             y_offset = (pyxel.FONT_HEIGHT + 2) * i
             text_x = self.center_text(text, DRAW_WIDTH)
@@ -414,8 +485,8 @@ class Snake:
         button_width = DRAW_WIDTH // 3 - 2
         button_height = HEIGHT_CONTROLS * SCALING_RATIO // 2 - 1
 
-        self.draw_button(x, y, w=button_width, h=button_height,col=COL_BLACK, text=TEXT_DEATH[-1], text_col=COL_WHITE, pressed_col=COL_GREEN)
-
+        self.draw_button(x, y, w=button_width, h=button_height, col=COL_BLACK, text=TEXT_DEATH[-1], text_col=COL_WHITE,
+                         pressed_col=COL_GREEN)
 
     @staticmethod
     def center_text(text, page_width, char_width=pyxel.FONT_WIDTH):
@@ -435,7 +506,6 @@ class Snake:
     @staticmethod
     def center_button_text_vertically(button_y, button_height, char_height=pyxel.FONT_HEIGHT):
         """Helper function for calculating the start x value for centered text."""
-
 
         return button_y + (button_height - char_height) // 2
 
