@@ -12,7 +12,7 @@ R: Restart the game
 
 Created by Marcus Croucher in 2018.
 """
-
+import logging
 from collections import deque, namedtuple
 
 import pyxel
@@ -95,6 +95,8 @@ SCORE_SPEED = {
 }
 
 DEFAULT_SPEED = 20
+MAX_TIME_BONUS = 300
+MAX_SECONDS_PER_POINT = 3
 COLLISION_WITH_WALLS = False
 
 SPEED_TO_FRAME_MAPPING = {
@@ -136,6 +138,9 @@ def define_colors():
     # pyxel.colors[COL_PINK] = 0xc43486
 
 
+logging.basicConfig(filename='snake_game.log', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
 class Snake:
     """The class that sets up and runs the game."""
 
@@ -158,10 +163,18 @@ class Snake:
         """Initiate key variables (direction, snake, apple, score, etc.)"""
 
         self.direction = RIGHT
+        self.popped_point = None
+        self.popped_point_1 = None
+        self.popped_point_2 = None
         self.snake = deque()
         self.snake.append(START)
+        self.apple = None
         self.death = False
+        self.melons = 0
+        self.apples = 0
         self.score = 0
+        self.time_bonus = 0
+        self.last_eaten_frame = 0
         self.generate_fruit()
         self.speed = DEFAULT_SPEED
         self.speed_frames = deque(SPEED_TO_FRAME_MAPPING[self.speed])
@@ -169,6 +182,10 @@ class Snake:
         self.frame_count = 0
         self.last_update_before = 0
         self.mouse_pressed_button = None
+        self.debug_mode = False
+        self.last_inputs = deque(maxlen=10)  # Store last 10 inputs for debugging
+        self.frame_history = deque(maxlen=60)  # Store last 60 frames of snake positions
+        logging.info("Game initialized")
 
         pyxel.playm(0, loop=True)
 
@@ -181,12 +198,12 @@ class Snake:
         self.last_update_before = 0
 
     def update(self):
-        """Update logic of game.
-        Updates the snake and checks for scoring/win condition."""
         self.frame_count += 1
         self.last_update_before += 1
+
         if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
             self.check_button_hitboxes()
+
         if not self.death:
             self.update_direction()
             if self.last_update_before == self.current_frame_speed:
@@ -195,9 +212,20 @@ class Snake:
                 self.check_death()
                 self.check_fruit()
 
+                # Log snake position every frame
+                self.frame_history.append(list(self.snake))
+                logging.debug(f"Frame {self.frame_count}: Snake positions: {list(self.snake)}")
         else:
             if self.mouse_pressed_button == 'up':
                 self.reset()
+
+        # Debug options
+        if pyxel.btnp(pyxel.KEY_D):
+            self.debug_mode = not self.debug_mode
+            logging.info(f"Debug mode {'enabled' if self.debug_mode else 'disabled'}")
+
+        if pyxel.btnp(pyxel.KEY_L):
+            self.log_game_state()
 
         if pyxel.btn(pyxel.KEY_Q):
             pyxel.quit()
@@ -231,9 +259,6 @@ class Snake:
             down=[lower_row_high, lower_row_low, second_col_left, second_col_right],
             left=[lower_row_high, lower_row_low, first_col_left, first_col_right],
             right=[lower_row_high, lower_row_low, third_col_left, third_col_right])
-        print(hitboxes)
-        print(x)
-        print(y)
         for key, hitbox in hitboxes.items():
             if (hitbox[2] < x < hitbox[3]) & (hitbox[0] < y < hitbox[1]):
                 print(key)
@@ -243,6 +268,7 @@ class Snake:
 
     def update_direction(self):
         """Watch the keys and change direction."""
+        previous_direction = self.direction
         if self.mouse_pressed_button:
             match self.mouse_pressed_button:
                 case 'up':
@@ -272,6 +298,13 @@ class Snake:
                 if self.direction is not LEFT:
                     self.direction = RIGHT
 
+        # Log direction changes
+        if self.direction != previous_direction:
+            logging.info(f"Direction changed from {previous_direction} to {self.direction}")
+
+        # Store input for debugging
+        self.last_inputs.append(self.direction)
+
     def get_new_snake_head(self):
         old_head = self.snake[0]
 
@@ -287,27 +320,34 @@ class Snake:
 
         return Point(old_head.x + self.direction.x, old_head.y + self.direction.y)
 
-
     def update_snake(self):
         """Move the snake based on the direction."""
-
         new_head = self.get_new_snake_head()
         self.snake.appendleft(new_head)
+        self.popped_point_2 = self.popped_point_1
+        self.popped_point_1 = self.popped_point
         self.popped_point = self.snake.pop()
 
     def check_fruit(self):
-        if SCORE_SPEED.get(self.score) is not None:
+        if SCORE_SPEED.get(self.melons + self.apples) is not None:
             self.check_melon()
         else:
             self.check_apple()
-
+    def add_time_bonus(self):
+        self.time_bonus += min(max(MAX_SECONDS_PER_POINT * 60 + self.last_eaten_frame - self.frame_count, 0), MAX_TIME_BONUS)
+        self.last_eaten_frame = self.frame_count
     def check_melon(self):
         if {self.snake[0]}.intersection(set(self.melon)):
-            self.speed = SCORE_SPEED[self.score]
-            self.score += 1
+
+            self.speed = SCORE_SPEED[self.melons + self.apples]
+            self.melons += 1
+            self.score += 3
+
+            self.add_time_bonus()
             self.generate_fruit()
             self.snake.append(self.popped_point)
-            self.snake.append(self.popped_point)
+            self.snake.append(self.popped_point_1)
+            self.snake.append(self.popped_point_2)
 
             self.speed_frames = deque(SPEED_TO_FRAME_MAPPING[self.speed])
             pyxel.play(0, 0)
@@ -316,14 +356,16 @@ class Snake:
         """Check whether the snake is on an apple."""
 
         if self.snake[0] == self.apple:
+            self.apples += 1
             self.score += 1
+            self.add_time_bonus()
             self.snake.append(self.popped_point)
             self.generate_fruit()
 
             pyxel.play(0, 0)
 
     def generate_fruit(self):
-        if SCORE_SPEED.get(self.score) is not None:
+        if SCORE_SPEED.get(self.melons + self.apples) is not None:
             self.generate_melon()
         else:
             self.generate_apple()
@@ -351,43 +393,43 @@ class Snake:
             y = pyxel.rndi(HEIGHT_SCORE + 2, HEIGHT - HEIGHT_CONTROLS - 2)
             self.melon = self.melon_points(x, y)
 
-    def check_death(self):
-        """Check whether the snake has died (out of bounds or doubled up.)"""
+    # def check_death(self):
+    #     """Check whether the snake has died (out of bounds or doubled up.)"""
+    #
+    #     head = self.snake[0]
+    #     if self.wall_collision:
+    #         if head.x < 0 or head.y < HEIGHT_SCORE or head.x >= WIDTH or head.y >= HEIGHT - HEIGHT_CONTROLS:
+    #             self.death_event()
+    #     if len(self.snake) != len(set(self.snake)):
+    #         self.death_event()
 
-        head = self.snake[0]
-        if self.wall_collision:
-            if head.x < 0 or head.y < HEIGHT_SCORE or head.x >= WIDTH or head.y >= HEIGHT - HEIGHT_CONTROLS:
-                self.death_event()
-        if len(self.snake) != len(set(self.snake)):
-            self.death_event()
-
-    def death_event(self):
-        """Kill the game (bring up end screen)."""
-        self.death = True  # Check having run into self
-
-        pyxel.stop()
-        pyxel.play(0, 1)
+    # def death_event(self):
+    #     """Kill the game (bring up end screen)."""
+    #     self.death = True  # Check having run into self
+    #
+    #     pyxel.stop()
+    #     pyxel.play(0, 1)
 
     ##############
     # Draw logic #
     ##############
 
     def draw(self):
-        """Draw the background, snake, score, and apple OR the end screen."""
-
         if not self.death:
             pyxel.cls(col=COL_BLACK)
             self.draw_snake()
             self.draw_score()
             self.draw_fruit()
             self.draw_controls()
-            # pyxel.pset(self.apple.x, self.apple.y, col=COL_APPLE)
 
+            # Draw debug information
+            if self.debug_mode:
+                self.draw_debug_info()
         else:
             self.draw_death()
 
     def draw_fruit(self):
-        if SCORE_SPEED.get(self.score) is not None:
+        if SCORE_SPEED.get(self.melons + self.apples) is not None:
             self.draw_melon()
         else:
             self.draw_apple()
@@ -395,10 +437,8 @@ class Snake:
     def draw_apple(self):
         # pyxel.rect(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_WHITE)
         # pyxel.rectb(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_LIGHT_YELLOW)
-        pyxel.blt(self.apple.draw_x-2, self.apple.draw_y-2, 0,0, 0, 8, 8, colkey=pyxel.COLOR_BLACK)
+        pyxel.blt(self.apple.draw_x - 2, self.apple.draw_y - 2, 0, 0, 0, 8, 8, colkey=pyxel.COLOR_BLACK)
         # pyxel.rect(self.apple.draw_x, self.apple.draw_y, w=SCALING_RATIO, h=SCALING_RATIO, col=COL_WHITE)
-
-
 
         # greenery_offset = SCALING_RATIO // 2
         # pyxel.pset(self.apple.draw_x + greenery_offset, self.apple.draw_y - 1, COL_GREEN)
@@ -406,7 +446,7 @@ class Snake:
         # pyxel.pset(self.apple.draw_x, self.apple.draw_y, col=COL_MAGENTA)
 
     def draw_melon(self):
-        pyxel.blt(self.melon[0].draw_x-4, self.melon[0].draw_y-4, 0,16, 0, 16, 16, colkey=pyxel.COLOR_BLACK)
+        pyxel.blt(self.melon[0].draw_x - 4, self.melon[0].draw_y - 4, 0, 16, 0, 16, 16, colkey=pyxel.COLOR_BLACK)
         # pyxel.rect(self.melon[0].draw_x, self.melon[0].draw_y, w=SCALING_RATIO * 2, h=SCALING_RATIO * 2, col=COL_GREEN)
 
     def draw_snake(self):
@@ -423,7 +463,7 @@ class Snake:
     def draw_score(self):
         """Draw the score at the top."""
 
-        score = f"{self.score * 100:04}"
+        score = f"{self.score * 100 + self.time_bonus:04}"
         pyxel.rect(0, 0, DRAW_WIDTH, HEIGHT_SCORE * SCALING_RATIO, COL_MAGENTA)
         pyxel.text(1, 1, score, COL_WHITE)
 
@@ -474,7 +514,14 @@ class Snake:
 
         pyxel.cls(col=COL_WHITE)
         display_text = TEXT_DEATH[:-1]
-        display_text.insert(1, f"{self.score * 100:04}")
+        display_text.append(' ')
+        display_text.append('FRUIT')
+        display_text.append(f"{self.score * 100:04}")
+        display_text.append(' ')
+        display_text.append('TIME BONUS')
+        display_text.append(f'{self.time_bonus:04}')
+        display_text.append('-----')
+        display_text.append(f"{self.score * 100 + self.time_bonus:03}")
         for i, text in enumerate(display_text):
             y_offset = (pyxel.FONT_HEIGHT + 2) * i
             text_x = self.center_text(text, DRAW_WIDTH)
@@ -508,6 +555,40 @@ class Snake:
         """Helper function for calculating the start x value for centered text."""
 
         return button_y + (button_height - char_height) // 2
+
+    def check_death(self):
+        head = self.snake[0]
+        if self.wall_collision:
+            if head.x < 0 or head.y < HEIGHT_SCORE or head.x >= WIDTH or head.y >= HEIGHT - HEIGHT_CONTROLS:
+                logging.warning(f"Death by wall collision at position {head}")
+                self.death_event()
+        if len(self.snake) != len(set(self.snake)):
+            logging.warning(f"Death by self-collision at position {head}")
+            self.death_event()
+
+    def death_event(self):
+        self.death = True
+        logging.critical(f"Game over at frame {self.frame_count}")
+        logging.info(f"Last 10 inputs: {list(self.last_inputs)}")
+        logging.info(f"Last 60 frames of snake positions: {list(self.frame_history)}")
+        pyxel.stop()
+        pyxel.play(0, 1)
+
+    def log_game_state(self):
+        logging.info(f"Current game state:")
+        logging.info(f"Score: {self.score}")
+        logging.info(f"Snake length: {len(self.snake)}")
+        logging.info(f"Snake head position: {self.snake[0]}")
+        logging.info(f"Apple position: {self.apple}")
+        logging.info(f"Current speed: {self.speed}")
+        logging.info(f"Frame count: {self.frame_count}")
+
+
+
+    def draw_debug_info(self):
+        pyxel.text(1, HEIGHT_SCORE * SCALING_RATIO + 1, f"Frame: {self.frame_count}", pyxel.COLOR_GRAY)
+        pyxel.text(1, HEIGHT_SCORE * SCALING_RATIO + 9, f"Speed: {self.speed}", pyxel.COLOR_GRAY)
+        pyxel.text(1, HEIGHT_SCORE * SCALING_RATIO + 17, f"Head: {self.snake[0]}", pyxel.COLOR_GRAY)
 
 
 ###########################
